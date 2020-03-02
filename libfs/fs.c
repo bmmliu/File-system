@@ -41,14 +41,14 @@ struct __attribute__((packed)) RootDir {
 struct  __attribute__((packed)) FileDescriptor {
   int ifopened;
   uint8_t filename[FS_FILENAME_LEN];
-  uint16_t orderofopen;
-  uint16_t rootindex;
+  uint16_t fdnumber;
+  uint16_t fdoffset;
 };
 
 struct Superblock superblock;
 struct FAT *fat;
 struct RootDir rootdir[FS_FILE_MAX_COUNT];
-struct FileDescriptor fd[FS_OPEN_MAX_COUNT];
+struct FileDescriptor FD[FS_OPEN_MAX_COUNT];
 /* For the sake of error management */
 int mounted;
 
@@ -234,8 +234,8 @@ int fs_delete(const char *filename) {
 
   /* To check if the file is currently opened */
   for(size_t i = 0; i <FS_OPEN_MAX_COUNT; i++) {
-    if(strcmp((char*)fd[i].filename, filename) == 0) {
-      if(fd[i].ifopened) {
+    if(strcmp((char*)FD[i].filename, filename) == 0) {
+      if(FD[i].ifopened) {
         return -1;
       } else{
         break;
@@ -249,6 +249,7 @@ int fs_delete(const char *filename) {
       memset(rootdir[i].filename, '\0', strlen(filename));
       rootdir[i].size_of_file = 0;
       size_t get_datablk = rootdir[i].index_first_datablk;
+      rootdir[i].index_first_datablk = 0;
 
       /* Here we free the allocation in the fat */
       while(get_datablk != FAT_EOC) {
@@ -260,6 +261,8 @@ int fs_delete(const char *filename) {
 
   }
 
+  return 0;
+
 }
 
 int fs_ls(void) {
@@ -268,7 +271,7 @@ int fs_ls(void) {
   }
   printf("FS Ls:");
   for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
-    if (rootdir[i].filename[0] != '\0') {
+    if (strlen((char*)rootdir[i].filename)) {
       printf("\nfile: %s, size: %d, ", rootdir[i].filename, rootdir[i].size_of_file);
       printf("data_blk: %d", rootdir[i].index_first_datablk);
     }
@@ -304,11 +307,48 @@ int fs_open(const char *filename) {
     return -1;
   }
 
-  if()
+  /* To check if already maximum amount */
+  int openfilecount = 0;
+  for(int i = 0; i < FS_OPEN_MAX_COUNT; i++)
+  {
+    if(strlen((char*)FD[i].filename) != 0){
+      openfilecount++;
+    }
+  }
+  if(openfilecount == FS_OPEN_MAX_COUNT) {
+    return -1;
+  }
+
+  /* Now we try to initialize the file descrpitor */
+  for(uint16_t i = 0; i < FS_OPEN_MAX_COUNT; i++)
+  {
+    if(strlen((char*)FD[i].filename) == 0){
+      strcpy((char*)FD[i].filename, filename);
+      FD[i].ifopened = 1;
+      FD[i].fdnumber = i;
+      FD[i].fdoffset = 0;
+      return FD[i].fdnumber;
+    }
+  }
+  return 0;
+
 }
 
 int fs_close(int fd) {
-  /* TODO: Phase 3 */
+  if(FD[fd].fdnumber > FS_OPEN_MAX_COUNT - 1 || FD[fd].fdnumber < 0 ) {
+    return -1;
+  }
+
+  if(FD[fd].ifopened == 1) {
+    return -1;
+  }
+
+  FD[fd].fdnumber = -1;
+  FD[fd].ifopened = 0;
+  FD[fd].fdoffset = 0;
+  return 0;
+
+
 }
 
 int fs_stat(int fd) {
