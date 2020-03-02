@@ -258,7 +258,6 @@ int fs_delete(const char *filename) {
         get_datablk = whatisnext;
       }
     }
-
   }
 
   return 0;
@@ -269,14 +268,13 @@ int fs_ls(void) {
   if(!mounted) {
     return -1;
   }
-  printf("FS Ls:");
+  printf("FS Ls:\n");
   for (int i = 0; i < FS_FILE_MAX_COUNT; i++) {
     if (strlen((char*)rootdir[i].filename)) {
-      printf("\nfile: %s, size: %d, ", rootdir[i].filename, rootdir[i].size_of_file);
-      printf("data_blk: %d", rootdir[i].index_first_datablk);
+      printf("file: %s, size: %d, ", rootdir[i].filename, rootdir[i].size_of_file);
+      printf("data_blk: %d\n", rootdir[i].index_first_datablk);
     }
   }
-  printf("\n");
   return 0;
 }
 
