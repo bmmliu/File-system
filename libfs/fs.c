@@ -350,11 +350,40 @@ int fs_close(int fd) {
 }
 
 int fs_stat(int fd) {
-  /* TODO: Phase 3 */
+  if(FD[fd].fdnumber > FS_OPEN_MAX_COUNT - 1 || FD[fd].fdnumber < 0 ) {
+    return -1;
+  }
+
+  if(FD[fd].ifopened == 1) {
+    return -1;
+  }
+
+  for(int i = 0; i < FS_FILE_MAX_COUNT; i++)
+  {
+    if(strcmp((char*)rootdir[i].filename, (char*)FD[fd].filename) == 0)
+    {
+      return rootdir[i].size_of_file;
+    }
+  }
+
+  return 0;
 }
 
 int fs_lseek(int fd, size_t offset) {
-  /* TODO: Phase 3 */
+  if(fd > FS_OPEN_MAX_COUNT - 1 ||fd < 0 ) {
+    return -1;
+  }
+
+  if(FD[fd].ifopened == 1) {
+    return -1;
+  }
+
+  if(offset < 0) {
+    return -1;
+  }
+
+  
+
 }
 
 int fs_write(int fd, void *buf, size_t count) {
