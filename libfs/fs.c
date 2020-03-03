@@ -24,10 +24,7 @@ struct __attribute__((packed)) Superblock {
   uint8_t unused[UNUSED_SUPERBLOCK];
 };
 
-/* Data structure for FAT */
-struct __attribute__((packed)) FAT {
-  uint16_t content;
-};
+
 
 /* Data structure for rootdir */
 struct __attribute__((packed)) RootDir {
@@ -43,14 +40,16 @@ struct  __attribute__((packed)) FileDescriptor {
   uint8_t filename[FS_FILENAME_LEN];
   uint16_t fdnumber;
   uint16_t fdoffset;
+  uint16_t indexinroot;
+
 };
 
 struct Superblock superblock;
-struct FAT *fat;
+uint16_t *fat;
 struct RootDir rootdir[FS_FILE_MAX_COUNT];
 struct FileDescriptor FD[FS_OPEN_MAX_COUNT];
 /* For the sake of error management */
-int mounted;
+int mounted = 0;
 
 int fs_mount(const char *diskname) {
   /* Open the virtual disk */
@@ -59,12 +58,12 @@ int fs_mount(const char *diskname) {
   }
 
   /* Read the block */
-  if (block_read(0, &superblock) == -1) {
+  if (block_read(0, (void*)&superblock) == -1) {
     return -1;
   }
 
   /* Check the signature */
-  if (strncmp((char *) superblock.signature, SIGNATURE, SIGNATURELENGTH) != 0) {
+  if (strncmp((char *)superblock.signature, SIGNATURE, SIGNATURELENGTH) != 0) { //jjjjjjjj
     return -1;
   }
 
@@ -73,14 +72,14 @@ int fs_mount(const char *diskname) {
     return -1;
   }
 
-  fat = malloc((size_t) BLOCK_SIZE * superblock.num_blk_FAT);
+  fat = (uint16_t *)malloc( BLOCK_SIZE * superblock.num_blk_FAT * sizeof(uint16_t));
   for (size_t i = 0; i < superblock.num_blk_FAT; i++) {
-    if (block_read(i + 1, fat + BLOCK_SIZE * i) == -1) {
+    if (block_read(i + 1, &fat[BLOCK_SIZE/2 * i]) == -1) {
       return -1;
     }
   }
 
-  if (block_read(superblock.root_dir_blk_index, rootdir) == -1) {
+  if (block_read(superblock.root_dir_blk_index, &rootdir) == -1) {
     return -1;
   }
 
@@ -94,17 +93,17 @@ int fs_umount(void) {
     return -1;
   }
 
-  if (block_write(0, &superblock) == -1) {
+  if (block_write(0, (void*)&superblock) == -1) {
     return -1;
   }
 
   for (size_t i = 0; i < superblock.num_blk_FAT; i++) {
-    if (block_write(i + 1, fat + BLOCK_SIZE * i) == -1) {
+    if (block_write(i + 1, &fat[BLOCK_SIZE/2 * i]) == -1) {
       return -1;
     }
   }
 
-  if (block_write(superblock.root_dir_blk_index, rootdir) == -1) {
+  if (block_write(superblock.root_dir_blk_index, &rootdir) == -1) {
     return -1;
   }
 
@@ -133,7 +132,7 @@ int fs_info(void) {
 
   int free_fat_count = 0;
   for(size_t i = 0; i < superblock.num_data_blks; i++) {
-    if(fat[i].content == 0) {
+    if(fat[i] == 0) {
       free_fat_count++;
     }
   }
@@ -142,7 +141,7 @@ int fs_info(void) {
 
   int free_root_count = 0;
   for(size_t i = 0; i < FS_FILE_MAX_COUNT; i++) {
-    if((char*)rootdir[i].filename == '\0') {
+    if(*rootdir[i].filename == 0) {
       free_root_count++;
     }
   }
@@ -179,7 +178,7 @@ int fs_create(const char *filename) {
   }
 
   /* Check if if the root directory already contains
-    %FS_FILE_MAX_COUNT files*/
+    FS_FILE_MAX_COUNT files*/
   int count = 0;
   for(size_t i = 0; i < FS_FILE_MAX_COUNT; i++) {
     if(strlen((char*)rootdir[i].filename)) {
@@ -251,11 +250,13 @@ int fs_delete(const char *filename) {
       size_t get_datablk = rootdir[i].index_first_datablk;
       rootdir[i].index_first_datablk = 0;
 
+      if (get_datablk == FAT_EOC) {
+        return 0;
+      }
       /* Here we free the allocation in the fat */
-      while(get_datablk != FAT_EOC) {
-        size_t whatisnext = fat[get_datablk].content;
-        fat[whatisnext].content = 0;
-        get_datablk = whatisnext;
+      while(fat[get_datablk] != FAT_EOC) {
+        fat[get_datablk] = 0;
+        get_datablk++;
       }
     }
   }
@@ -296,9 +297,13 @@ int fs_open(const char *filename) {
 
   /* Check if the file exist */
   int ifexist = 0;
+  uint16_t correspondroot = 0;
+
   for(size_t i = 0; i < FS_FILE_MAX_COUNT; i++) {
     if(strcmp((char*)rootdir[i].filename, filename) == 0) {
       ifexist = 1;
+      correspondroot = (uint16_t )i;
+      break;
     }
   }
   if(!ifexist) {
@@ -325,6 +330,7 @@ int fs_open(const char *filename) {
       FD[i].ifopened = 1;
       FD[i].fdnumber = i;
       FD[i].fdoffset = 0;
+      FD[i].indexinroot = correspondroot;
       return FD[i].fdnumber;
     }
   }
@@ -333,36 +339,38 @@ int fs_open(const char *filename) {
 }
 
 int fs_close(int fd) {
-  if(FD[fd].fdnumber > FS_OPEN_MAX_COUNT - 1 || FD[fd].fdnumber < 0 ) {
+  if(fd > FS_OPEN_MAX_COUNT - 1 || fd < 0 ) {
     return -1;
   }
 
-  if(FD[fd].ifopened == 1) {
+  if(FD[fd].ifopened == 0) {
     return -1;
   }
 
-  FD[fd].fdnumber = -1;
+  FD[fd].fdnumber = (uint16_t )-1;
   FD[fd].ifopened = 0;
   FD[fd].fdoffset = 0;
+  FD[fd].indexinroot = (uint16_t )-1;
+  strcpy((char*)FD[fd].filename, "");
   return 0;
 
 
 }
 
 int fs_stat(int fd) {
-  if(FD[fd].fdnumber > FS_OPEN_MAX_COUNT - 1 || FD[fd].fdnumber < 0 ) {
+  if(fd > FS_OPEN_MAX_COUNT - 1 || fd < 0 ) {
     return -1;
   }
 
-  if(FD[fd].ifopened == 1) {
+  if(FD[fd].ifopened == 0) {
     return -1;
   }
 
-  for(int i = 0; i < FS_FILE_MAX_COUNT; i++)
+  for(int i = 0; i < FS_OPEN_MAX_COUNT; i++)
   {
-    if(strcmp((char*)rootdir[i].filename, (char*)FD[fd].filename) == 0)
+    if(FD[i].fdnumber == fd)
     {
-      return rootdir[i].size_of_file;
+      return rootdir[FD[i].indexinroot].size_of_file;
     }
   }
 
@@ -374,23 +382,149 @@ int fs_lseek(int fd, size_t offset) {
     return -1;
   }
 
-  if(FD[fd].ifopened == 1) {
+  if(FD[fd].ifopened == 0) {
     return -1;
   }
 
-  if(offset < 0) {
+  if(offset > rootdir[FD[fd].indexinroot].size_of_file) {
     return -1;
   }
 
-  
+  FD[fd].fdoffset = (uint16_t)offset;
+
+  return 0;
+}
+
+
+uint16_t fs_findfirstblock()
+{
+  /* data block will start at block 1 to have same index with FAT */
+  uint16_t block = superblock.data_blk_start_index + 1;
+  while(block < superblock.total_blocks && fat[block]!= 0)
+    block++;
+
+  if (block == superblock.total_blocks)
+    return FAT_EOC;
+
+  /* update in fat array */
+  fat[block] = block;
+  return block - superblock.data_blk_start_index;
+}
+
+uint16_t fs_get_block_from_offset(uint16_t firstblock, uint16_t offset)
+{
+  uint16_t block = firstblock + superblock.data_blk_start_index;
+  while(offset >= BLOCK_SIZE)
+  {
+    uint16_t newblock = fat[block];
+    if (newblock == 0 || newblock == FAT_EOC)
+    {
+      newblock = fs_findfirstblock();
+      if (newblock == FAT_EOC)
+        return FAT_EOC;
+      newblock += superblock.data_blk_start_index;
+      fat[block] = newblock;
+    }
+    block = newblock;
+    offset -= BLOCK_SIZE;
+  }
+  return block;
+}
+
+
+
+int fs_write(int fd, void *buf, size_t count)
+{
+  /* check if fs is valid, fd is opened*/
+  if (!mounted || fd < 0 || fd >= FS_OPEN_MAX_COUNT || FD[fd].ifopened == 0)
+    return -1;
+
+  /* get the starting index of block in root entries */
+  uint16_t entry = FD[fd].indexinroot;
+  uint16_t firstblock = rootdir[entry].index_first_datablk;
+
+
+  /* when file is an empty file and needs to extend the size */
+  if (firstblock == FAT_EOC && count > 0)
+  {
+    firstblock = rootdir[entry].index_first_datablk = fs_findfirstblock();
+    if (firstblock == FAT_EOC)
+      return 0;
+  }
+
+  int byteswritten = 0;
+  uint16_t offset = FD[fd].fdoffset;
+
+  /* 1. check the position of offset in block. and set the bytesleft
+   * 2. convert offset position into the corresponding data block
+   * 3. copy the content of block out to tempbuf
+   * 4. copy the rest of the block content from @buf
+   * 5. overwritten the whole block with tempbuf */
+  uint8_t tmpbuffer[BLOCK_SIZE];
+  while(count > 0)
+  {
+    int bytesleft = BLOCK_SIZE - (offset % BLOCK_SIZE);
+    if (bytesleft > count)
+      bytesleft = count;
+
+    uint16_t block = fs_get_block_from_offset(firstblock, offset);
+    if (block == FAT_EOC || block_read(block, tmpbuffer) < 0)
+      break;
+
+    memcpy(tmpbuffer + (offset % BLOCK_SIZE), buf + byteswritten, bytesleft);
+    if (block_write(block, tmpbuffer) < 0)
+      break;
+
+    count -= bytesleft;
+    byteswritten += bytesleft;
+    offset += bytesleft;
+  }
+
+  if (rootdir[entry].size_of_file < offset)
+    rootdir[entry].size_of_file = offset;
+
+  FD[fd].fdoffset = offset;
+  return byteswritten;
 
 }
 
-int fs_write(int fd, void *buf, size_t count) {
-  /* TODO: Phase 4 */
-}
+int fs_read(int fd, void *buf, size_t count)
+{
+  /* check if fs is valid, fd is opened*/
+  if (!mounted || fd < 0 || fd >= FS_OPEN_MAX_COUNT || FD[fd].ifopened == 0)
+    return -1;
 
-int fs_read(int fd, void *buf, size_t count) {
-  /* TODO: Phase 4 */
-}
+  uint16_t entry = FD[fd].indexinroot;
+  uint16_t firstblock = rootdir[entry].index_first_datablk;
 
+  int bytesread = 0;
+  int size = rootdir[entry].size_of_file;
+  uint16_t offset = FD[fd].fdoffset;
+
+  if (offset + count > size)
+    count = size - offset;
+
+  /* read fd block by block */
+  uint8_t tmpbuffer[BLOCK_SIZE];
+  while(count > 0)
+  {
+    uint16_t bytesleft = BLOCK_SIZE - (offset % BLOCK_SIZE);
+    if (bytesleft > count)
+      bytesleft = count;
+    /* get the offset current block */
+    uint16_t block = fs_get_block_from_offset(firstblock, offset);
+    if (block == FAT_EOC || block_read(block, tmpbuffer) < 0)
+      break;
+    memcpy(buf + bytesread, tmpbuffer + (offset % BLOCK_SIZE), bytesleft);
+
+    /* copy offset current block into the buffer,
+     * and set offset points to next block */
+    count -= bytesleft;
+    bytesread += bytesleft;
+    offset += bytesleft;
+  }
+
+  /* implicitly incremented offset */
+  FD[fd].fdoffset = offset;
+  return bytesread;
+}

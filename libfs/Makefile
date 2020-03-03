@@ -17,7 +17,7 @@ DEPFLAGS = -MMD -MF $(@:.o=.d)
 
 ## TODO: Phase 1.1
 
-%.a: $(objs) queue.o thread.o
+%.a: $(objs)
 	@echo "AR $@"
 	$(Q)ar rcs $@ $^
 %.o: %.c
