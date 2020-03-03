@@ -453,7 +453,7 @@ int fs_write(int fd, void *buf, size_t count)
   }
 
   int byteswritten = 0;
-   uint16_t offset = FD[fd].fdoffset;
+  uint16_t offset = FD[fd].fdoffset;
 
   /* 1. check the position of offset in block. and set the bytesleft
    * 2. convert offset position into the corresponding data block
@@ -528,4 +528,3 @@ int fs_read(int fd, void *buf, size_t count)
   FD[fd].fdoffset = offset;
   return bytesread;
 }
-
