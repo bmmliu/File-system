@@ -191,7 +191,7 @@ int fs_create(const char *filename) {
 
   size_t first_entry = 0;
   for(size_t i = 0; i < FS_FILE_MAX_COUNT; i++) {
-    if(strlen((char*)rootdir[i].filename)) {
+    if(!strlen((char*)rootdir[i].filename)) {
       first_entry = i;
       strcpy((char*)rootdir[first_entry].filename, filename);
       rootdir[first_entry].size_of_file = 0;
@@ -255,8 +255,9 @@ int fs_delete(const char *filename) {
       }
       /* Here we free the allocation in the fat */
       while(fat[get_datablk] != FAT_EOC) {
+        size_t new_getblk = fat[get_datablk];
         fat[get_datablk] = 0;
-        get_datablk++;
+        get_datablk = new_getblk;
       }
     }
   }
@@ -323,18 +324,19 @@ int fs_open(const char *filename) {
   }
 
   /* Now we try to initialize the file descrpitor */
-  for(uint16_t i = 0; i < FS_OPEN_MAX_COUNT; i++)
+  uint16_t i;
+  for(i = 0; i < FS_OPEN_MAX_COUNT; i++)
   {
-    if(strlen((char*)FD[i].filename) == 0){
+    if(FD[i].ifopened == 0){
       strcpy((char*)FD[i].filename, filename);
       FD[i].ifopened = 1;
       FD[i].fdnumber = i;
       FD[i].fdoffset = 0;
       FD[i].indexinroot = correspondroot;
-      return FD[i].fdnumber;
+      break;
     }
   }
-  return 0;
+  return i;
 
 }
 
@@ -463,7 +465,7 @@ int fs_write(int fd, void *buf, size_t count)
   uint8_t tmpbuffer[BLOCK_SIZE];
   while(count > 0)
   {
-    int bytesleft = BLOCK_SIZE - (offset % BLOCK_SIZE);
+    uint16_t bytesleft = BLOCK_SIZE - (offset % BLOCK_SIZE);
     if (bytesleft > count)
       bytesleft = count;
 
@@ -498,7 +500,7 @@ int fs_read(int fd, void *buf, size_t count)
   uint16_t firstblock = rootdir[entry].index_first_datablk;
 
   int bytesread = 0;
-  int size = rootdir[entry].size_of_file;
+  uint16_t size = rootdir[entry].size_of_file;
   uint16_t offset = FD[fd].fdoffset;
 
   if (offset + count > size)
