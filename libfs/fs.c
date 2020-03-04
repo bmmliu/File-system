@@ -419,8 +419,7 @@ uint16_t fs_get_block_from_offset(uint16_t firstblock, uint16_t offset)
   while(offset >= BLOCK_SIZE)
   {
     uint16_t newblock = fat[block];
-    if (newblock == 0 || newblock == FAT_EOC)
-    {
+    if (newblock == 0 || newblock == FAT_EOC) {
       newblock = fs_findfirstblock();
       if (newblock == FAT_EOC)
         return FAT_EOC;
@@ -437,9 +436,17 @@ uint16_t fs_get_block_from_offset(uint16_t firstblock, uint16_t offset)
 
 int fs_write(int fd, void *buf, size_t count)
 {
-  /* check if fs is valid, fd is opened*/
-  if (!mounted || fd < 0 || fd >= FS_OPEN_MAX_COUNT || FD[fd].ifopened == 0)
+  if (!mounted) {
     return -1;
+  }
+
+  if(fd < 0 || fd >= FS_OPEN_MAX_COUNT) {
+    return -1;
+  }
+
+  if(FD[fd].ifopened == 0) {
+    return -1;
+  }
 
   /* get the starting index of block in root entries */
   uint16_t entry = FD[fd].indexinroot;
@@ -492,41 +499,49 @@ int fs_write(int fd, void *buf, size_t count)
 
 int fs_read(int fd, void *buf, size_t count)
 {
-  /* check if fs is valid, fd is opened*/
-  if (!mounted || fd < 0 || fd >= FS_OPEN_MAX_COUNT || FD[fd].ifopened == 0)
+  if (!mounted) {
     return -1;
-
-  uint16_t entry = FD[fd].indexinroot;
-  uint16_t firstblock = rootdir[entry].index_first_datablk;
-
-  int bytesread = 0;
-  uint16_t size = rootdir[entry].size_of_file;
-  uint16_t offset = FD[fd].fdoffset;
-
-  if (offset + count > size)
-    count = size - offset;
-
-  /* read fd block by block */
-  uint8_t tmpbuffer[BLOCK_SIZE];
-  while(count > 0)
-  {
-    uint16_t bytesleft = BLOCK_SIZE - (offset % BLOCK_SIZE);
-    if (bytesleft > count)
-      bytesleft = count;
-    /* get the offset current block */
-    uint16_t block = fs_get_block_from_offset(firstblock, offset);
-    if (block == FAT_EOC || block_read(block, tmpbuffer) < 0)
-      break;
-    memcpy(buf + bytesread, tmpbuffer + (offset % BLOCK_SIZE), bytesleft);
-
-    /* copy offset current block into the buffer,
-     * and set offset points to next block */
-    count -= bytesleft;
-    bytesread += bytesleft;
-    offset += bytesleft;
   }
 
-  /* implicitly incremented offset */
-  FD[fd].fdoffset = offset;
-  return bytesread;
+  if(fd < 0 || fd >= FS_OPEN_MAX_COUNT) {
+    return -1;
+  }
+
+  if(FD[fd].ifopened == 0) {
+    return -1;
+  }
+
+  uint16_t targetblock = rootdir[FD[fd].indexinroot].index_first_datablk;
+  uint8_t tmp[BLOCK_SIZE];
+  uint16_t byte_readed = 0;
+  uint32_t size_of_current_file = rootdir[FD[fd].indexinroot].size_of_file;
+
+  if (FD[fd].fdoffset + count > size_of_current_file) {
+    count = size_of_current_file - FD[fd].fdoffset;
+  }
+
+
+  /* To get the bytes after the offset within the block */
+  uint16_t bytestoread = (uint16_t )BLOCK_SIZE - (FD[fd].fdoffset % (uint16_t )BLOCK_SIZE);
+  if (bytestoread > count) {
+    bytestoread = (uint16_t )count;
+  }
+
+  while(count > 0) {
+    uint16_t block = fs_get_block_from_offset(targetblock, FD[fd].fdoffset);
+    if(block_read(block, tmp) == -1){
+      return -1;
+    }
+    if(block == FAT_EOC) {
+      break;
+    }
+    memcpy(buf + byte_readed, tmp + (FD[fd].fdoffset % BLOCK_SIZE), bytestoread);
+
+    byte_readed = byte_readed + bytestoread;
+    count = count - bytestoread;
+    FD[fd].fdoffset = FD[fd].fdoffset + bytestoread;
+    bytestoread = (uint16_t )BLOCK_SIZE - (FD[fd].fdoffset % (uint16_t )BLOCK_SIZE);
+  }
+
+  return byte_readed;
 }
